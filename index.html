@@ -84,7 +84,7 @@ class PacketGame {
   constructor(random = Math.random) { this.random = random; this.state = 'ready'; this.color = 0; this.score = 0; this.x = 110; this.y = 210; this.objects = []; this.boostRemaining = 0; this.loadBalancer = null; this.vpnShieldCount = 0; this.vpnObject = null; this.vpnHitFlash = 0; }
   start(width = 960) {
     this.width = width; this.color = Math.floor(this.random() * COLORS.length);
-    this.x = 110; this.y = (SETTINGS.floor + 25) / 2; this.vy = SETTINGS.flap; this.score = 0;
+    this.x = 110; this.y = (SETTINGS.floor + SETTINGS.ceiling) / 2; this.vy = SETTINGS.flap; this.score = 0;
     this.objects = []; this.nextX = Math.min(width - 40, 490); this.lastLane = 1;
     this.state = 'playing'; this.reason = '';
     this.elapsed = 0; this.fiber = null; this.eventNumber = 0;
@@ -108,7 +108,7 @@ class PacketGame {
     const x = camera + this.width + 55;
     const routes = this.objects.filter(item => !item.fire && !item.collected && item.color === this.color);
     routes.sort((a,b) => Math.abs(a.x-x)-Math.abs(b.x-x));
-    const y = routes.length ? routes[0].y : (SETTINGS.floor + 25) / 2;
+    const y = routes.length ? routes[0].y : (SETTINGS.floor + SETTINGS.ceiling) / 2;
     return { x, y: Math.max(85, Math.min(SETTINGS.floor - 60, y)) };
   }
   spawnLoadBalancer() {
@@ -148,7 +148,7 @@ class PacketGame {
   spawn() {
     while (this.nextX < this.x + this.width + SETTINGS.spacing) {
       // Each column offers one valid destination. Adjacent routes stay reachable.
-      const center = (SETTINGS.floor + 25) / 2;
+      const center = (SETTINGS.floor + SETTINGS.ceiling) / 2;
       const lanes = [center * .5, center, center * 1.5];
       const options = [0, 1, 2].filter(lane => Math.abs(lane - this.lastLane) <= 1);
       const safe = options[Math.floor(this.random() * options.length)];
@@ -239,12 +239,13 @@ if (typeof document !== 'undefined') {
     const rect = canvas.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
     const pixelWidth = Math.round(rect.width * dpr), pixelHeight = Math.round(rect.height * dpr);
     if (rect.height === 0 || (canvas.width === pixelWidth && canvas.height === pixelHeight)) return;
-    // Portrait fills the screen with a uniform 25% zoom; desktop keeps its original scale.
+    // Portrait gets another 10% zoom; desktop keeps its scale with thinner firewalls.
     const portrait = window.matchMedia('(max-width:750px) and (orientation:portrait)').matches;
     const previousHeight = worldHeight;
-    worldHeight = portrait ? rect.height * (420 * 1.35) / (rect.width * 1.25) : 420;
+    worldHeight = portrait ? rect.height * (420 * 1.35) / (rect.width * 1.375) : 420;
     width = worldHeight * rect.width / rect.height;
-    SETTINGS.floor = worldHeight - 25;
+    SETTINGS.ceiling = window.matchMedia('(min-width:751px)').matches ? 18 : 25;
+    SETTINGS.floor = worldHeight - SETTINGS.ceiling;
     const shift = (worldHeight - previousHeight) / 2;
     game.y += shift;
     for (const item of game.objects) item.y += shift;
@@ -313,17 +314,18 @@ if (typeof document !== 'undefined') {
     camera = Math.max(0, game.x - width * .24);
     ctx.strokeStyle='#dfe5ed';ctx.lineWidth=.6;
     ctx.beginPath();
-    for(let x=-(camera%32);x<width;x+=32){ctx.moveTo(x,25);ctx.lineTo(x,SETTINGS.floor);}
-    for(let y=43;y<SETTINGS.floor;y+=32){ctx.moveTo(0,y);ctx.lineTo(width,y);}
+    for(let x=-(camera%32);x<width;x+=32){ctx.moveTo(x,SETTINGS.ceiling);ctx.lineTo(x,SETTINGS.floor);}
+    for(let y=SETTINGS.ceiling+18;y<SETTINGS.floor;y+=32){ctx.moveTo(0,y);ctx.lineTo(width,y);}
     ctx.stroke();
     function firewall(y) {
-      ctx.fillStyle='#e8c6c3';ctx.fillRect(0,y,width,25);
+      const thickness=SETTINGS.ceiling;
+      ctx.fillStyle='#e8c6c3';ctx.fillRect(0,y,width,thickness);
       ctx.strokeStyle='#bc7e78';ctx.lineWidth=1;
       ctx.beginPath();
-      for(let x=-(camera%22)-22;x<width;x+=22){ctx.moveTo(x,y);ctx.lineTo(x+25,y+25);}
+      for(let x=-(camera%22)-22;x<width;x+=22){ctx.moveTo(x,y);ctx.lineTo(x+thickness,y+thickness);}
       ctx.stroke();
-      ctx.fillStyle='#f1dcd8';ctx.fillRect(width/2-62,y+3,124,18);
-      ctx.fillStyle='#8b4f4d';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText('FIREWALL / AVOID',width/2,y+16);
+      ctx.fillStyle='#f1dcd8';ctx.fillRect(width/2-62,y+(thickness===25?3:2),124,Math.min(18,thickness-4));
+      ctx.fillStyle='#8b4f4d';ctx.font='10px monospace';ctx.textAlign='center';ctx.fillText('FIREWALL / AVOID',width/2,y+thickness/2+3.5);
     }
     firewall(0);firewall(SETTINGS.floor);
     if (game.fiber) {

@@ -149,7 +149,7 @@ class PacketGame {
     while (this.nextX < this.x + this.width + SETTINGS.spacing) {
       // Each column offers one valid destination. Adjacent routes stay reachable.
       const center = (SETTINGS.floor + 25) / 2;
-      const lanes = [center - 105, center, center + 105];
+      const lanes = [center * .5, center, center * 1.5];
       const options = [0, 1, 2].filter(lane => Math.abs(lane - this.lastLane) <= 1);
       const safe = options[Math.floor(this.random() * options.length)];
       lanes.forEach((y, lane) => {
@@ -239,10 +239,10 @@ if (typeof document !== 'undefined') {
     const rect = canvas.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
     const pixelWidth = Math.round(rect.width * dpr), pixelHeight = Math.round(rect.height * dpr);
     if (rect.height === 0 || (canvas.width === pixelWidth && canvas.height === pixelHeight)) return;
-    // Portrait gets more vertical room, keeping the original packet scale and physics.
+    // Portrait fills the screen with a uniform 25% zoom; desktop keeps its original scale.
     const portrait = window.matchMedia('(max-width:750px) and (orientation:portrait)').matches;
     const previousHeight = worldHeight;
-    worldHeight = portrait ? Math.max(420, rect.height * (420 * 1.35) / rect.width) : 420;
+    worldHeight = portrait ? rect.height * (420 * 1.35) / (rect.width * 1.25) : 420;
     width = worldHeight * rect.width / rect.height;
     SETTINGS.floor = worldHeight - 25;
     const shift = (worldHeight - previousHeight) / 2;

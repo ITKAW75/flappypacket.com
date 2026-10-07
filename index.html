@@ -61,7 +61,7 @@ a:focus-visible,button:focus-visible,canvas:focus-visible{outline:3px solid #b77
         </div>
         <div class="roadscape" aria-hidden="true"></div>
       </div>
-      <p class="sr-only" id="instructions">Press to flap. Your packet travels right automatically. Reach an interface matching your packet’s color and letter for +1 hop. Other interfaces, fire, the ceiling, and the floor end the run. Every run gets a random route color. Occasional fiber cuts sweep from right to left. Pass through the opening. Collect the L load balancer for six seconds of matching interfaces and faster routing. Fire, firewalls, and fiber cuts remain dangerous. Collect VPN shields to stack protection against wrong interfaces. VPN Tunnel-N below the packet shows remaining charges.</p>
+      <p class="sr-only" id="instructions">Press to flap. Your packet travels right automatically. Reach an interface matching your packet’s color and letter for +1 hop. Other interfaces, fire, the ceiling, and the floor end the run. Every run gets a random route color. Occasional fiber cuts sweep from right to left. Pass through the opening. Collect the L load balancer for six seconds of matching interfaces and faster routing. Fire, firewalls, and fiber cuts remain dangerous. Collect VPN shields to stack protection against wrong interfaces. VPN Tunnel-N below the packet shows remaining charges. Gold IP badges add a trailing clone and double hop points. Either packet can hit hazards. One fire or wrong interface consumes the clone before VPN protection; firewalls and fiber cuts still end the run.</p>
       <p id="announcement" class="sr-only" role="status" aria-live="polite"></p>
       <noscript><p>Enable JavaScript to play Flappy Packet.</p></noscript>
     </section>
@@ -74,6 +74,8 @@ const FIBER = { minimumInterval: 10, maximumInterval: 30, gapHeight: 196, minimu
 // Load-balancer pickup: short routing assist, not immunity to physical hazards.
 const BOOST = { duration: 6, speedMultiplier: 1.25, firstMinimum: 8, firstMaximum: 14, minimumInterval: 18, maximumInterval: 28, radius: 21 };
 const VPN = { firstMinimum: 4, firstMaximum: 8, minimumInterval: 12, maximumInterval: 20, radius: 18, hitFlash: .18 };
+// Gold IP clone: doubles hop points and absorbs one floating hazard; never physical boundaries.
+const IP = { firstMinimum:10, firstMaximum:16, minimumInterval:16, maximumInterval:26, radius:20, offset:36, followDelay:.09, breakTime:.24 };
 const COLORS = [
   { name: 'Sage', label: 'S', fill: '#d2e2c9', ink: '#426440' },
   { name: 'Blue', label: 'B', fill: '#d2e3ed', ink: '#376781' },
@@ -81,7 +83,7 @@ const COLORS = [
 ];
 
 class PacketGame {
-  constructor(random = Math.random) { this.onSound = () => {}; this.random = random; this.state = 'ready'; this.color = 0; this.score = 0; this.x = 110; this.y = 210; this.objects = []; this.boostRemaining = 0; this.loadBalancer = null; this.vpnShieldCount = 0; this.vpnObject = null; this.vpnHitFlash = 0; }
+  constructor(random = Math.random) { this.onSound = () => {}; this.random = random; this.state = 'ready'; this.color = 0; this.score = 0; this.x = 110; this.y = 210; this.objects = []; this.boostRemaining = 0; this.loadBalancer = null; this.vpnShieldCount = 0; this.vpnObject = null; this.vpnHitFlash = 0; this.hasIpClone = false; this.scoreMultiplier = 1; this.cloneY = 210; this.ipObject = null; this.cloneBreak = null; }
   start(width = 960) {
     this.width = width; this.color = Math.floor(this.random() * COLORS.length);
     this.x = 110; this.y = (SETTINGS.floor + SETTINGS.ceiling) / 2; this.vy = SETTINGS.flap; this.score = 0;
@@ -93,6 +95,8 @@ class PacketGame {
     this.nextBoostAt = this.elapsed + this.boostInterval(true);
     this.vpnShieldCount = 0; this.vpnObject = null; this.vpnHitFlash = 0;
     this.nextVpnAt = this.elapsed + this.vpnInterval(true);
+    this.hasIpClone = false; this.scoreMultiplier = 1; this.cloneY = this.y; this.ipObject = null; this.cloneBreak = null;
+    this.nextIpAt = this.elapsed + this.ipInterval(true);
   }
   flap() { if (this.state === 'playing') { this.vy = SETTINGS.flap; this.onSound('flap'); } }
   fiberInterval() { return FIBER.minimumInterval + this.random() * (FIBER.maximumInterval - FIBER.minimumInterval); }
@@ -125,6 +129,24 @@ class PacketGame {
     // Keep simultaneous pickups visually distinct without changing the route.
     if (this.loadBalancer && Math.abs(this.loadBalancer.x - this.vpnObject.x) < 80) this.vpnObject.x += 90;
     this.nextVpnAt = Infinity;
+  }
+  ipInterval(first=false) {
+    const minimum=first?IP.firstMinimum:IP.minimumInterval, maximum=first?IP.firstMaximum:IP.maximumInterval;
+    return minimum+this.random()*(maximum-minimum);
+  }
+  spawnIp() {
+    this.ipObject=this.pickupPosition();
+    while([this.loadBalancer,this.vpnObject].some(item=>item&&Math.abs(item.x-this.ipObject.x)<80))this.ipObject.x+=90;
+    this.nextIpAt=Infinity;
+  }
+  collectIp() {
+    this.hasIpClone=true;this.scoreMultiplier=2;this.cloneY=this.y;this.ipObject=null;this.nextIpAt=Infinity;
+    this.onSound('ip');
+  }
+  breakClone(item) {
+    item.collected=true;this.cloneBreak={x:this.x-IP.offset,y:this.cloneY,remaining:IP.breakTime};
+    this.hasIpClone=false;this.scoreMultiplier=1;this.nextIpAt=this.elapsed+this.ipInterval();
+    this.onSound('clone-break');
   }
   activateBoost() { this.onSound('powerup'); this.boostRemaining = BOOST.duration; this.loadBalancer = null; this.nextBoostAt = Infinity; }
   beginFiberCut() {
@@ -159,11 +181,12 @@ class PacketGame {
       this.lastLane = safe; this.nextX += SETTINGS.spacing + this.random() * 50;
     }
   }
-  end(reason) { this.onSound('collision'); this.state = 'over'; this.reason = reason; this.boostRemaining = 0; this.loadBalancer = null; this.vpnObject = null; this.vpnShieldCount = 0; this.vpnHitFlash = 0; }
+  end(reason) { this.onSound('collision'); this.state = 'over'; this.reason = reason; this.boostRemaining = 0; this.loadBalancer = null; this.vpnObject = null; this.vpnShieldCount = 0; this.vpnHitFlash = 0; this.hasIpClone = false; this.scoreMultiplier = 1; this.ipObject = null; this.cloneBreak = null; }
   update(dt) {
     if (this.state !== 'playing') return;
     this.elapsed += dt;
     this.vpnHitFlash = Math.max(0, this.vpnHitFlash - dt);
+    if(this.cloneBreak){this.cloneBreak.remaining-=dt;if(this.cloneBreak.remaining<=0)this.cloneBreak=null;}
     if (this.boostRemaining > 0) {
       this.boostRemaining = Math.max(0, this.boostRemaining - dt);
       if (this.boostRemaining === 0) this.nextBoostAt = this.elapsed + this.boostInterval();
@@ -171,15 +194,19 @@ class PacketGame {
     if (!this.fiber && this.elapsed >= this.nextFiberAt) this.beginFiberCut();
     if (!this.loadBalancer && this.boostRemaining === 0 && this.elapsed >= this.nextBoostAt) this.spawnLoadBalancer();
     if (!this.vpnObject && this.elapsed >= this.nextVpnAt) this.spawnVpn();
+    if(!this.ipObject&&!this.hasIpClone&&this.elapsed>=this.nextIpAt)this.spawnIp();
     const speed = this.horizontalSpeed();
     this.x += speed * dt;
     this.vy += SETTINGS.gravity * dt; this.y += this.vy * dt;
-    if (this.y - SETTINGS.radius <= SETTINGS.ceiling || this.y + SETTINGS.radius >= SETTINGS.floor) { this.end('The firewall blocked your packet.'); return; }
+    if(this.hasIpClone)this.cloneY+=(this.y-this.cloneY)*(1-Math.exp(-dt/IP.followDelay));
+    const outside=y=>y-SETTINGS.radius<=SETTINGS.ceiling||y+SETTINGS.radius>=SETTINGS.floor;
+    if (outside(this.y)||(this.hasIpClone&&outside(this.cloneY))) { this.end('The firewall blocked your packet.'); return; }
     if (this.fiber) {
       const event = this.fiber;
       event.x += (speed - FIBER.sweepSpeed) * dt;
-      if (Math.abs(this.x - event.x) <= event.halfWidth + SETTINGS.radius &&
-          (this.y - SETTINGS.radius <= event.gapY - event.gapHeight / 2 || this.y + SETTINGS.radius >= event.gapY + event.gapHeight / 2)) {
+      const blocked=(x,y)=>Math.abs(x-event.x)<=event.halfWidth+SETTINGS.radius&&
+        (y-SETTINGS.radius<=event.gapY-event.gapHeight/2||y+SETTINGS.radius>=event.gapY+event.gapHeight/2);
+      if (blocked(this.x,this.y)||(this.hasIpClone&&blocked(this.x-IP.offset,this.cloneY))) {
         this.end('The fiber cut interrupted your connection.'); return;
       }
       const camera = Math.max(0, this.x - this.width * .24);
@@ -205,16 +232,27 @@ class PacketGame {
         this.vpnObject = null; this.nextVpnAt = this.elapsed + this.vpnInterval();
       }
     }
+    if(this.ipObject){
+      const item=this.ipObject;
+      if(Math.hypot(item.x-this.x,item.y-this.y)<IP.radius+SETTINGS.radius)this.collectIp();
+      else if(item.x<this.x-IP.radius-SETTINGS.radius){this.ipObject=null;this.nextIpAt=this.elapsed+this.ipInterval();}
+    }
     for (const item of this.objects) {
-      if (!item.collected && Math.abs(item.x - this.x) < 32 && Math.abs(item.y - this.y) < 30) {
-        if (item.fire) { this.end('Malicious traffic disrupted the route.'); return; }
-        if (this.interfaceColor(item) !== this.color) {
-          if (this.vpnShieldCount === 0) { this.end('Wrong interface for this route.'); return; }
-          this.vpnShieldCount--; this.onSound('shield'); this.vpnHitFlash = VPN.hitFlash;
-          item.collected = true; continue; // Neutralized once; no successful-hop point.
-        }
-        item.collected = true; this.score++; this.onSound('hop');
+      if(item.collected)continue;
+      const lead=Math.abs(item.x-this.x)<32&&Math.abs(item.y-this.y)<30;
+      const rear=this.hasIpClone&&Math.abs(item.x-(this.x-IP.offset))<32&&Math.abs(item.y-this.cloneY)<30;
+      if(!lead&&!rear)continue;
+      const wrong=this.interfaceColor(item)!==this.color;
+      if(item.fire||wrong){
+        // Clone absorbs first, preserving VPN charges; VPN still only blocks wrong interfaces.
+        if(this.hasIpClone){this.breakClone(item);continue;}
+        if(item.fire){this.end('Malicious traffic disrupted the route.');return;}
+        if(this.vpnShieldCount===0){this.end('Wrong interface for this route.');return;}
+        this.vpnShieldCount--;this.onSound('shield');this.vpnHitFlash=VPN.hitFlash;
+        item.collected=true;continue;
       }
+      // Only the lead collects destinations: a clone never scores the same interface twice.
+      if(lead){item.collected=true;this.score+=this.scoreMultiplier;this.onSound('hop');}
     }
     this.objects = this.objects.filter(item => item.x > this.x - this.width);
     this.spawn();
@@ -331,10 +369,10 @@ class PencilAudio {
     } else if(event==='hop'){
       this.voice({noise:true,duration:.04,volume:.05,filter:650});
       this.voice({frequency:880,end:880,delay:.018,duration:.12,volume:.027,type:'triangle',filter:1900});
-    } else if(event==='powerup'){
+    } else if(event==='powerup'||event==='ip'){
       this.voice({noise:true,duration:.16,volume:.035,filter:1400});
       [660,880,1100].forEach((frequency,i)=>this.voice({frequency,end:frequency*1.03,delay:i*.045,duration:.17,volume:.021,filter:2000}));
-    } else if(event==='shield'){
+    } else if(event==='shield'||event==='clone-break'){
       this.voice({noise:true,duration:.035,volume:.024,filter:1300});
       this.voice({frequency:540,end:340,duration:.13,volume:.023,filter:900});
     } else if(event==='collision'){
@@ -376,6 +414,9 @@ if (typeof document !== 'undefined') {
     for (const item of game.objects) item.y += shift;
     if (game.loadBalancer) game.loadBalancer.y += shift;
     if (game.vpnObject) game.vpnObject.y += shift;
+    game.cloneY += shift;
+    if(game.ipObject)game.ipObject.y+=shift;
+    if(game.cloneBreak)game.cloneBreak.y+=shift;
     if (game.fiber) game.fiber.gapY += shift;
     canvas.width = pixelWidth; canvas.height = pixelHeight;
     ctx.setTransform(canvas.width / width, 0, 0, canvas.height / worldHeight, 0, 0);
@@ -410,6 +451,25 @@ if (typeof document !== 'undefined') {
     ctx.save(); ctx.translate(x,y); ctx.fillStyle='#efd7b9';ctx.strokeStyle='#a56b39';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(0,-18);ctx.bezierCurveTo(5,-3,19,-2,12,12);ctx.bezierCurveTo(6,23,-15,17,-13,3);ctx.lineTo(-6,-7);ctx.lineTo(-5,3);ctx.closePath();ctx.fill();ctx.stroke();
     ctx.fillStyle='#895225';ctx.font='bold 16px sans-serif';ctx.textAlign='center';ctx.fillText('!',0,11);ctx.restore();
+  }
+  function ipPickup(x,y) {
+    ctx.save();ctx.translate(x,y);ctx.lineWidth=1.3;
+    // Static pencil halo: no bobbing, pulsing, or animated icon movement.
+    ctx.fillStyle='#f4e7b780';ctx.beginPath();ctx.roundRect(-24,-21,48,42,10);ctx.fill();
+    ctx.fillStyle='#f0dfa2';ctx.strokeStyle='#a58c48';ctx.beginPath();ctx.roundRect(-20,-16,40,32,7);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#79663d';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.fillText('[IP]',0,4);ctx.restore();
+  }
+  function ipClone() {
+    if(game.hasIpClone){
+      const x=game.x-IP.offset-camera;packet(x,game.cloneY,game.color);
+      ctx.save();ctx.fillStyle='#927c42';ctx.font='9px monospace';ctx.textAlign='center';ctx.fillText('IP ×2',x,game.cloneY-25);ctx.restore();
+    }
+    if(game.cloneBreak&&!reducedMotion.matches){
+      const dust=game.cloneBreak,p=1-dust.remaining/IP.breakTime;
+      ctx.save();ctx.globalAlpha=1-p;ctx.fillStyle=COLORS[game.color].ink;
+      for(let i=0;i<6;i++){const angle=i*Math.PI/3;ctx.fillRect(dust.x-camera+Math.cos(angle)*(8+p*16),dust.y+Math.sin(angle)*(8+p*16),3,3);}
+      ctx.restore();
+    }
   }
   function vpnPickup(x,y) {
     ctx.save();ctx.translate(x,y);ctx.fillStyle='#d2e3ed';ctx.strokeStyle='#55788c';ctx.lineWidth=1.5;ctx.lineJoin='round';
@@ -492,6 +552,7 @@ if (typeof document !== 'undefined') {
         if (loadBalancerImage.complete && loadBalancerImage.naturalWidth > 0) ctx.drawImage(loadBalancerImage,sx-23,game.loadBalancer.y-23,46,46);
       }
       if (game.vpnObject) vpnPickup(game.vpnObject.x-camera,game.vpnObject.y);
+      if (game.ipObject) ipPickup(game.ipObject.x-camera,game.ipObject.y);
       if (game.boostRemaining > 0) {
         const sx = game.x - camera, c = COLORS[game.color];
         ctx.save();ctx.strokeStyle=c.ink;ctx.fillStyle=c.ink;ctx.lineWidth=1;
@@ -502,6 +563,7 @@ if (typeof document !== 'undefined') {
         ctx.globalAlpha=1;ctx.font='10px monospace';ctx.textAlign='center';
         ctx.fillText(`L · ${Math.ceil(game.boostRemaining)}s`,sx,Math.max(SETTINGS.ceiling+12,game.y-26));ctx.restore();
       }
+      ipClone();
       packet(game.x-camera,game.y,game.color,true);
       vpnProtection(game.x-camera,game.y);
     }
@@ -544,12 +606,14 @@ if (typeof document !== 'undefined') {
     if(game.state==='playing'){
       const boostBefore = game.boostRemaining;
       const vpnBefore = game.vpnShieldCount;
+      const ipBefore = game.hasIpClone;
       flapFlash = Math.max(0, flapFlash - dt);
       accumulator+=dt;
       while(accumulator>=1/120&&game.state==='playing'){game.update(1/120);accumulator-=1/120;}
       if (game.state === 'playing' && boostBefore === 0 && game.boostRemaining > 0) ui.announcement.textContent='Load balancer collected. Six-second routing boost. Interfaces match your color; physical hazards remain dangerous.';
       else if (game.state === 'playing' && boostBefore > 0 && game.boostRemaining === 0) ui.announcement.textContent='Routing boost ended. Normal interface colors and speed restored.';
       if (game.state === 'playing' && vpnBefore !== game.vpnShieldCount) ui.announcement.textContent=game.vpnShieldCount > vpnBefore ? `VPN tunnel collected. ${game.vpnShieldCount} charges.` : `VPN tunnel absorbed a wrong interface. ${game.vpnShieldCount} charges remaining.`;
+      if(game.state==='playing'&&ipBefore!==game.hasIpClone)ui.announcement.textContent=game.hasIpClone?'IP clone collected. Double hop points; your trailing packet can collide too.':'IP clone absorbed a hazard. Normal hop points restored.';
       const scoreText=String(game.score).padStart(2,'0');
       if(ui.score.textContent!==scoreText)ui.score.textContent=scoreText;
       if(game.state==='over')finish();

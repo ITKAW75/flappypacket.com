@@ -61,7 +61,7 @@ a:focus-visible,button:focus-visible,canvas:focus-visible{outline:3px solid #b77
         </div>
         <div class="roadscape" aria-hidden="true"></div>
       </div>
-      <p class="sr-only" id="instructions">Press to flap. Your packet travels right automatically. Reach an interface matching your packet’s color and letter for +1 hop. Other interfaces, fire, the ceiling, and the floor end the run. Every run gets a random route color. Occasional fiber cuts sweep from right to left. Pass through the opening. Collect the L load balancer for six seconds of matching interfaces and faster routing. Fire, firewalls, and fiber cuts remain dangerous. Collect VPN shields to stack protection against wrong interfaces. VPN Tunnel-N below the packet shows remaining charges. Gold IP badges add a trailing clone and double hop points. Either packet can hit hazards. One fire or wrong interface consumes the clone before VPN protection; firewalls and fiber cuts still end the run.</p>
+      <p class="sr-only" id="instructions">Press to flap. Your packet travels right automatically. Reach an interface matching your packet’s color and letter for +1 hop. Other interfaces, fire, the ceiling, and the floor end the run. Every run gets a random route color. Occasional fiber cuts sweep from right to left. Pass through the opening. Collect the L load balancer for six seconds of matching interfaces and faster routing. Fire, firewalls, and fiber cuts remain dangerous. Collect VPN shields to stack protection against wrong interfaces. VPN Tunnel-N below the packet shows remaining charges. Gold IP badges add a trailing clone and double hop points. Either packet can hit hazards. One fire or wrong interface consumes the clone before VPN protection; firewalls and fiber cuts still end the run. A sad-page warning tracks you before a red DNS globe locks to your altitude and sweeps left. Move above or below it. DNS errors bypass both VPN and IP protection, including the trailing packet.</p>
       <p id="announcement" class="sr-only" role="status" aria-live="polite"></p>
       <noscript><p>Enable JavaScript to play Flappy Packet.</p></noscript>
     </section>
@@ -76,6 +76,8 @@ const BOOST = { duration: 6, speedMultiplier: 1.25, firstMinimum: 8, firstMaximu
 const VPN = { firstMinimum: 4, firstMaximum: 8, minimumInterval: 12, maximumInterval: 20, radius: 18, hitFlash: .18 };
 // Gold IP clone: doubles hop points and absorbs one floating hazard; never physical boundaries.
 const IP = { firstMinimum:10, firstMaximum:16, minimumInterval:16, maximumInterval:26, radius:20, offset:36, followDelay:.09, breakTime:.24 };
+// DNS error: silent tracking warning, then a fixed-altitude shield-piercing globe.
+const DNS = { firstMinimum:18, firstMaximum:26, minimumInterval:22, maximumInterval:34, warningTime:1.8, speed:240, radius:17 };
 const COLORS = [
   { name: 'Sage', label: 'S', fill: '#d2e2c9', ink: '#426440' },
   { name: 'Blue', label: 'B', fill: '#d2e3ed', ink: '#376781' },
@@ -83,7 +85,7 @@ const COLORS = [
 ];
 
 class PacketGame {
-  constructor(random = Math.random) { this.onSound = () => {}; this.random = random; this.state = 'ready'; this.color = 0; this.score = 0; this.x = 110; this.y = 210; this.objects = []; this.boostRemaining = 0; this.loadBalancer = null; this.vpnShieldCount = 0; this.vpnObject = null; this.vpnHitFlash = 0; this.hasIpClone = false; this.scoreMultiplier = 1; this.cloneY = 210; this.ipObject = null; this.cloneBreak = null; }
+  constructor(random = Math.random) { this.onSound = () => {}; this.random = random; this.state = 'ready'; this.color = 0; this.score = 0; this.x = 110; this.y = 210; this.objects = []; this.boostRemaining = 0; this.loadBalancer = null; this.vpnShieldCount = 0; this.vpnObject = null; this.vpnHitFlash = 0; this.hasIpClone = false; this.scoreMultiplier = 1; this.cloneY = 210; this.ipObject = null; this.cloneBreak = null; this.dnsWarningActive = false; this.dnsTimer = 0; this.lockedTargetY = 0; this.dnsGlobe = null; }
   start(width = 960) {
     this.width = width; this.color = Math.floor(this.random() * COLORS.length);
     this.x = 110; this.y = (SETTINGS.floor + SETTINGS.ceiling) / 2; this.vy = SETTINGS.flap; this.score = 0;
@@ -97,6 +99,8 @@ class PacketGame {
     this.nextVpnAt = this.elapsed + this.vpnInterval(true);
     this.hasIpClone = false; this.scoreMultiplier = 1; this.cloneY = this.y; this.ipObject = null; this.cloneBreak = null;
     this.nextIpAt = this.elapsed + this.ipInterval(true);
+    this.dnsWarningActive=false;this.dnsTimer=0;this.lockedTargetY=0;this.dnsGlobe=null;
+    this.nextDnsAt=this.elapsed+this.dnsInterval(true);
   }
   flap() { if (this.state === 'playing') { this.vy = SETTINGS.flap; this.onSound('flap'); } }
   fiberInterval() { return FIBER.minimumInterval + this.random() * (FIBER.maximumInterval - FIBER.minimumInterval); }
@@ -129,6 +133,31 @@ class PacketGame {
     // Keep simultaneous pickups visually distinct without changing the route.
     if (this.loadBalancer && Math.abs(this.loadBalancer.x - this.vpnObject.x) < 80) this.vpnObject.x += 90;
     this.nextVpnAt = Infinity;
+  }
+  dnsInterval(first=false) {
+    const minimum=first?DNS.firstMinimum:DNS.minimumInterval,maximum=first?DNS.firstMaximum:DNS.maximumInterval;
+    return minimum+this.random()*(maximum-minimum);
+  }
+  beginDnsWarning() {this.dnsWarningActive=true;this.dnsTimer=DNS.warningTime;this.nextDnsAt=Infinity;}
+  updateDns(dt,cameraBefore) {
+    const camera=Math.max(0,this.x-this.width*.24);
+    if(this.dnsGlobe){
+      const globe=this.dnsGlobe;
+      // Move in screen space at a constant speed, independent of routing boosts.
+      globe.x+=camera-cameraBefore-DNS.speed*dt;
+      const hit=(x,y)=>Math.hypot(globe.x-x,globe.y-y)<=DNS.radius+SETTINGS.radius;
+      if(hit(this.x,this.y)||(this.hasIpClone&&hit(this.x-IP.offset,this.cloneY))){
+        this.end('DNS error caused total network failure.','dns-fail');return;
+      }
+      if(globe.x-camera < -DNS.radius-8){this.dnsGlobe=null;this.nextDnsAt=this.elapsed+this.dnsInterval();this.onSound('dns-clear');}
+    } else if(this.dnsWarningActive){
+      this.dnsTimer=Math.max(0,this.dnsTimer-dt);
+      if(this.dnsTimer===0){
+        this.dnsWarningActive=false;this.lockedTargetY=this.y;
+        this.dnsGlobe={x:camera+this.width+DNS.radius+8,y:this.lockedTargetY};
+        this.onSound('dns-attack',(this.width+DNS.radius*2+16)/DNS.speed);
+      }
+    } else if(this.elapsed>=this.nextDnsAt)this.beginDnsWarning();
   }
   ipInterval(first=false) {
     const minimum=first?IP.firstMinimum:IP.minimumInterval, maximum=first?IP.firstMaximum:IP.maximumInterval;
@@ -181,7 +210,7 @@ class PacketGame {
       this.lastLane = safe; this.nextX += SETTINGS.spacing + this.random() * 50;
     }
   }
-  end(reason) { this.onSound('collision'); this.state = 'over'; this.reason = reason; this.boostRemaining = 0; this.loadBalancer = null; this.vpnObject = null; this.vpnShieldCount = 0; this.vpnHitFlash = 0; this.hasIpClone = false; this.scoreMultiplier = 1; this.ipObject = null; this.cloneBreak = null; }
+  end(reason,sound='collision') { this.onSound(sound); this.state = 'over'; this.reason = reason; this.boostRemaining = 0; this.loadBalancer = null; this.vpnObject = null; this.vpnShieldCount = 0; this.vpnHitFlash = 0; this.hasIpClone = false; this.scoreMultiplier = 1; this.ipObject = null; this.cloneBreak = null; this.dnsWarningActive=false; this.dnsTimer=0; this.dnsGlobe=null; }
   update(dt) {
     if (this.state !== 'playing') return;
     this.elapsed += dt;
@@ -195,7 +224,7 @@ class PacketGame {
     if (!this.loadBalancer && this.boostRemaining === 0 && this.elapsed >= this.nextBoostAt) this.spawnLoadBalancer();
     if (!this.vpnObject && this.elapsed >= this.nextVpnAt) this.spawnVpn();
     if(!this.ipObject&&!this.hasIpClone&&this.elapsed>=this.nextIpAt)this.spawnIp();
-    const speed = this.horizontalSpeed();
+    const speed = this.horizontalSpeed(), cameraBefore=Math.max(0,this.x-this.width*.24);
     this.x += speed * dt;
     this.vy += SETTINGS.gravity * dt; this.y += this.vy * dt;
     if(this.hasIpClone)this.cloneY+=(this.y-this.cloneY)*(1-Math.exp(-dt/IP.followDelay));
@@ -215,6 +244,8 @@ class PacketGame {
         this.fiber = null; this.nextFiberAt = this.elapsed + this.fiberInterval();
       }
     }
+    this.updateDns(dt,cameraBefore);
+    if(this.state!=='playing')return;
     if (this.loadBalancer) {
       const item = this.loadBalancer;
       // Collect before interface checks so a pickup genuinely activates at contact.
@@ -282,23 +313,26 @@ class PencilAudio {
   }
   pause() {
     this.stopMusic();
-    for(const source of this.voices){try{source.stop();}catch(_){}}
-    this.voices.clear();
+    // Suspend the attack drone with the audio clock so it resumes without a second scrape.
+    for(const source of [...this.voices]){
+      if(this.dnsVoices?.includes(source))continue;
+      try{source.stop();}catch(_){}this.voices.delete(source);
+    }
     if(this.context?.state==='running')this.context.suspend().catch(()=>{});
   }
-  voice({noise=false,frequency=440,end=frequency,duration=.1,delay=0,volume=.03,filter=1800,type='sine'}) {
+  voice({noise=false,frequency=440,end=frequency,duration=.1,delay=0,volume=.03,filter=1800,type='sine',attack=.004}) {
     const c=this.context;
     if(!this.enabled||!c||c.state!=='running'||this.voices.size>=12)return;
     const source=noise?c.createBufferSource():c.createOscillator(),tone=c.createBiquadFilter(),gain=c.createGain();
     const at=c.currentTime+delay;
-    if(noise)source.buffer=this.noise;
+    if(noise){source.buffer=this.noise;source.loop=duration>.3;}
     else {source.type=type;source.frequency.setValueAtTime(frequency,at);source.frequency.exponentialRampToValueAtTime(end,at+duration);}
     tone.type=noise?'bandpass':'lowpass';tone.frequency.value=filter;tone.Q.value=noise?.7:.5;
-    gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(volume,at+.004);gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
+    gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(volume,at+attack);gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
     source.connect(tone);tone.connect(gain);gain.connect(c.destination);
     this.voices.add(source);
     source.onended=()=>{this.voices.delete(source);source.disconnect();tone.disconnect();gain.disconnect();};
-    source.start(at);source.stop(at+duration+.01);
+    source.start(at);source.stop(at+duration+.01);return source;
   }
   // Render an original eight-bar loop once, off the live audio thread.
   async makeMusic() {
@@ -360,8 +394,29 @@ class PencilAudio {
     source.stop(c.currentTime+.05);this.musicSource=null;
   }
 
-  play(event) {
+  stopDns() {
+    for(const source of this.dnsVoices||[]){try{source.stop();}catch(_){}}
+    this.dnsVoices=[];
+  }
+  play(event,duration=2) {
     if(!this.enabled||!this.context||this.context.state!=='running')return;
+    if(event==='dns-clear'){this.stopDns();return;}
+    if(event==='dns-attack'){
+      this.stopDns();
+      this.dnsVoices=[
+        this.voice({noise:true,duration:.19,volume:.07,filter:1400}),
+        ...[110,130.81,164.81].map(frequency=>this.voice({frequency,end:frequency*.65,duration:Math.max(.3,duration),volume:.025,type:'sawtooth',filter:520,attack:.07})),
+        this.voice({noise:true,duration:Math.max(.3,duration),volume:.006,filter:1000})
+      ].filter(Boolean);return;
+    }
+    if(event==='dns-fail'){
+      this.stopMusic();this.stopDns();
+      this.voice({noise:true,duration:.16,volume:.13,filter:1700});
+      this.voice({noise:true,delay:.02,duration:.11,volume:.08,filter:650});
+      for(let i=0;i<3;i++)this.voice({frequency:105,end:32,delay:.06+i*.14,duration:.32,volume:.095*2**(-i),type:'sawtooth',filter:650});
+      return;
+    }
+    if(event==='collision')this.stopDns();
     if(event==='flap'){
       const pitch=2**(((Math.random()-.5)*.3)/12);
       this.voice({noise:true,duration:.055,volume:.035,filter:2100});
@@ -387,7 +442,7 @@ if (typeof document !== 'undefined') {
   const canvas = document.querySelector('#game'), ctx = canvas.getContext('2d');
   const game = new PacketGame();
   const audio = new PencilAudio();
-  game.onSound = event => audio.play(event);
+  game.onSound = (event,duration) => audio.play(event,duration);
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const loadBalancerImage = new Image();
   loadBalancerImage.src = 'data:image/webp;base64,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';
@@ -417,6 +472,8 @@ if (typeof document !== 'undefined') {
     game.cloneY += shift;
     if(game.ipObject)game.ipObject.y+=shift;
     if(game.cloneBreak)game.cloneBreak.y+=shift;
+    game.lockedTargetY+=shift;
+    if(game.dnsGlobe)game.dnsGlobe.y+=shift;
     if (game.fiber) game.fiber.gapY += shift;
     canvas.width = pixelWidth; canvas.height = pixelHeight;
     ctx.setTransform(canvas.width / width, 0, 0, canvas.height / worldHeight, 0, 0);
@@ -451,6 +508,26 @@ if (typeof document !== 'undefined') {
     ctx.save(); ctx.translate(x,y); ctx.fillStyle='#efd7b9';ctx.strokeStyle='#a56b39';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(0,-18);ctx.bezierCurveTo(5,-3,19,-2,12,12);ctx.bezierCurveTo(6,23,-15,17,-13,3);ctx.lineTo(-6,-7);ctx.lineTo(-5,3);ctx.closePath();ctx.fill();ctx.stroke();
     ctx.fillStyle='#895225';ctx.font='bold 16px sans-serif';ctx.textAlign='center';ctx.fillText('!',0,11);ctx.restore();
+  }
+  function dnsArtwork() {
+    if(game.dnsWarningActive){
+      const x=game.x-camera,y=game.y-46;
+      ctx.save();ctx.translate(x,y);ctx.lineWidth=1.3;ctx.strokeStyle='#ab6762';ctx.fillStyle='#f4ded9';ctx.lineJoin='round';
+      // Tiny broken-page face, with an exclamation badge, in the pencil icon style.
+      ctx.beginPath();ctx.moveTo(-10,-14);ctx.lineTo(3,-14);ctx.lineTo(10,-7);ctx.lineTo(10,13);ctx.lineTo(-10,13);ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.beginPath();ctx.moveTo(3,-14);ctx.lineTo(3,-7);ctx.lineTo(10,-7);ctx.stroke();
+      ctx.fillStyle='#99534f';ctx.fillRect(-5,-3,2,3);ctx.fillRect(3,-3,2,3);
+      ctx.beginPath();ctx.moveTo(-5,7);ctx.quadraticCurveTo(0,2,5,7);ctx.stroke();
+      ctx.fillStyle='#ab6762';ctx.font='bold 12px monospace';ctx.textAlign='center';ctx.fillText('!',16,0);ctx.restore();
+    }
+    if(game.dnsGlobe){
+      const globe=game.dnsGlobe,x=globe.x-camera;
+      ctx.save();ctx.translate(x,globe.y);ctx.fillStyle='#d78e89';ctx.strokeStyle='#984e4c';ctx.lineWidth=1.4;
+      ctx.beginPath();ctx.arc(0,0,DNS.radius,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.strokeStyle='#f4ded6';ctx.lineWidth=1.2;
+      ctx.beginPath();ctx.ellipse(0,0,7,15,0,0,Math.PI*2);ctx.moveTo(-15,0);ctx.lineTo(15,0);
+      ctx.moveTo(-13,-8);ctx.quadraticCurveTo(0,-4,13,-8);ctx.moveTo(-13,8);ctx.quadraticCurveTo(0,4,13,8);ctx.stroke();ctx.restore();
+    }
   }
   function ipPickup(x,y) {
     ctx.save();ctx.translate(x,y);ctx.lineWidth=1.3;
@@ -566,6 +643,7 @@ if (typeof document !== 'undefined') {
       ipClone();
       packet(game.x-camera,game.y,game.color,true);
       vpnProtection(game.x-camera,game.y);
+      dnsArtwork();
     }
   }
   function start() {
@@ -607,6 +685,7 @@ if (typeof document !== 'undefined') {
       const boostBefore = game.boostRemaining;
       const vpnBefore = game.vpnShieldCount;
       const ipBefore = game.hasIpClone;
+      const dnsBefore = game.dnsWarningActive;
       flapFlash = Math.max(0, flapFlash - dt);
       accumulator+=dt;
       while(accumulator>=1/120&&game.state==='playing'){game.update(1/120);accumulator-=1/120;}
@@ -614,6 +693,7 @@ if (typeof document !== 'undefined') {
       else if (game.state === 'playing' && boostBefore > 0 && game.boostRemaining === 0) ui.announcement.textContent='Routing boost ended. Normal interface colors and speed restored.';
       if (game.state === 'playing' && vpnBefore !== game.vpnShieldCount) ui.announcement.textContent=game.vpnShieldCount > vpnBefore ? `VPN tunnel collected. ${game.vpnShieldCount} charges.` : `VPN tunnel absorbed a wrong interface. ${game.vpnShieldCount} charges remaining.`;
       if(game.state==='playing'&&ipBefore!==game.hasIpClone)ui.announcement.textContent=game.hasIpClone?'IP clone collected. Double hop points; your trailing packet can collide too.':'IP clone absorbed a hazard. Normal hop points restored.';
+      if(game.state==='playing'&&!dnsBefore&&game.dnsWarningActive)ui.announcement.textContent='DNS error warning. A red globe will target your current altitude.';
       const scoreText=String(game.score).padStart(2,'0');
       if(ui.score.textContent!==scoreText)ui.score.textContent=scoreText;
       if(game.state==='over')finish();
